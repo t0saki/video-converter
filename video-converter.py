@@ -1,4 +1,5 @@
 # -*- coding: UTF-8 -*-
+# reference: https://www.stubbornhuang.com/1192/
 # version 1.4
 import configparser
 import os
