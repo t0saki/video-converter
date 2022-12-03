@@ -145,7 +145,7 @@ class FFmpegBatchConversionVideo:
             videoin, speed_present, self.m_Video_CRF, videoout)
         # change shell title with filename
         os.system('xtitle ' + str(self.m_TotalConversionFiles) +
-                  '/' + str(self.m_TotalFiles) + ' ' + videoin)
+                  '/' + str(self.m_TotalFiles) + ' ' + os.path.split(videoin)[-1])
         # returncode = subprocess.call(t_ffmpegcmdline)
         returncode = subprocess.call(t_ffmpegcmdline, shell=True)
         self.m_TotalConversionFiles += 1
