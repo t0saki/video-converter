@@ -188,6 +188,10 @@ if __name__ == '__main__':
     opeartion_end_time = datetime.datetime.now()
     opeartion_duration = opeartion_end_time - opeartion_start_time
 
-    print('Conversion finished, total time: ' + str(opeartion_duration)) + 's\n' + 'Total files: ' + \
-        str(ffmpegBatchConversionVideo.m_TotalFiles) + '\n' + 'Total conversion files: ' + \
-        str(ffmpegBatchConversionVideo.m_TotalConversionFiles)
+
+    try:
+        print('Conversion finished, total time: ' + str(opeartion_duration)) + 's\n' + 'Total files: ' + \
+            str(ffmpegBatchConversionVideo.m_TotalFiles) + '\n' + 'Total conversion files: ' + \
+            str(ffmpegBatchConversionVideo.m_TotalConversionFiles)
+    except Exception as e:
+        print(e)
