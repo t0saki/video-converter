@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 in_format = ['.mp4', '.avi', '.mkv', '.flv', '.rmvb', '.wmv',
              '.mov', '.mpg', '.mpeg', '.m4v', '.3gp', '.f4v', '.webm', '.ts']
-speed_present = "medium"
+speed_present = 4
 
 data_time = datetime.datetime.now().strftime('%m-%d-%H:%M:%S')
 logs_name = data_time + "-logs.txt"
@@ -141,11 +141,14 @@ class FFmpegBatchConversionVideo:
     def ModifyVideoBitRate(self, videoin, videoout):
         # t_ffmpegcmdline = 'ffmpeg -i "{}"  -b:v {} -threads 4 "{}" -hide_banner'.format(
         #     videoin, self.m_Video_BitRate, videoout)
-        t_ffmpegcmdline = 'ffmpeg -loglevel error -stats -i "{}" -c:v libx265 -x265-params log-level=error -preset {}  -crf {} -pix_fmt yuv420p10le -c:a libopus -b:a 64k "{}"'.format(
-            videoin, speed_present, self.m_Video_CRF, videoout)
+        # t_ffmpegcmdline = 'ffmpeg -loglevel error -stats -i "{}" -c:v libx265 -x265-params log-level=error -preset {}  -crf {} -pix_fmt yuv420p10le -c:a libopus -b:a 64k "{}"'.format(
+        #     videoin, speed_present, self.m_Video_CRF, videoout)
+        t_ffmpegcmdline = f"ffmpeg -loglevel error -stats -i \"{videoin}\" -c:v libsvtav1 -preset {speed_present} -crf {self.m_Video_CRF} -pix_fmt yuv420p10le -c:a libopus -b:a 64k \"{videoout}\""
         # change shell title with filename
         os.system('xtitle ' + str(self.m_TotalConversionFiles) +
                   '/' + str(self.m_TotalFiles) + ' ' + os.path.split(videoin)[-1])
+        # print(str(self.m_TotalConversionFiles) +
+                #   '/' + str(self.m_TotalFiles) + ' ' + os.path.split(videoin)[-1])
         # returncode = subprocess.call(t_ffmpegcmdline)
         returncode = subprocess.call(t_ffmpegcmdline, shell=True)
         self.m_TotalConversionFiles += 1
