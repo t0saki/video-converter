@@ -67,7 +67,7 @@ class FFmpegBatchConversionVideo:
                         self.m_TotalFiles += 1
 
             # for files in os.listdir(inputPath):
-            for files in tqdm(os.listdir(inputPath)):  # 增加tqdm进度条
+            for files in tqdm(os.listdir(inputPath), ncols=50):
                 input_name = os.path.join(inputPath, files)
                 # change extension to .mkv
                 final_name = os.path.join(
@@ -143,12 +143,13 @@ class FFmpegBatchConversionVideo:
         #     videoin, self.m_Video_BitRate, videoout)
         # t_ffmpegcmdline = 'ffmpeg -loglevel error -stats -i "{}" -c:v libx265 -x265-params log-level=error -preset {}  -crf {} -pix_fmt yuv420p10le -c:a libopus -b:a 64k "{}"'.format(
         #     videoin, speed_present, self.m_Video_CRF, videoout)
-        t_ffmpegcmdline = f"ffmpeg -loglevel error -stats -i \"{videoin}\" -c:v libsvtav1 -preset {speed_present} -crf {self.m_Video_CRF} -pix_fmt yuv420p10le -c:a libopus -b:a 64k \"{videoout}\""
+        t_ffmpegcmdline = f"ffmpeg -loglevel error -stats -i \"{videoin}\" -c:v libsvtav1 -preset {
+            speed_present} -crf {self.m_Video_CRF} -pix_fmt yuv420p10le -c:a libopus -b:a 64k \"{videoout}\""
         # change shell title with filename
         os.system('xtitle ' + str(self.m_TotalConversionFiles) +
                   '/' + str(self.m_TotalFiles) + ' ' + os.path.split(videoin)[-1])
         # print(str(self.m_TotalConversionFiles) +
-                #   '/' + str(self.m_TotalFiles) + ' ' + os.path.split(videoin)[-1])
+        #   '/' + str(self.m_TotalFiles) + ' ' + os.path.split(videoin)[-1])
         # returncode = subprocess.call(t_ffmpegcmdline)
         returncode = subprocess.call(t_ffmpegcmdline, shell=True)
         self.m_TotalConversionFiles += 1
@@ -190,7 +191,6 @@ if __name__ == '__main__':
 
     opeartion_end_time = datetime.datetime.now()
     opeartion_duration = opeartion_end_time - opeartion_start_time
-
 
     try:
         print('Conversion finished, total time: ' + str(opeartion_duration)) + 's\n' + 'Total files: ' + \
