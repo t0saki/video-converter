@@ -106,7 +106,7 @@ def main():
     parser.add_argument("input_dir", type=str, help="Input directory containing video files.")
     parser.add_argument("output_dir", type=str, help="Output directory for converted videos.")
     parser.add_argument("--delete", action='store_true', help="Delete original files after conversion.")
-    parser.add_argument("--ffmpeg_args", type=str, help="Additional arguments to pass to ffmpeg.", default="-loglevel error -stats -c:v libsvtav1 -preset 4 -crf 25 -pix_fmt yuv420p10le -c:a libopus -b:a 64k -threads 12")
+    parser.add_argument("--ffmpeg_args", type=str, help="Additional arguments to pass to ffmpeg.", default="-loglevel error -stats -c:v libsvtav1 -preset 4 -crf 25 -pix_fmt yuv420p10le -c:a libopus -b:a 64k")
     
     args = parser.parse_args()
 
