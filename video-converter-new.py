@@ -9,6 +9,7 @@ import logging
 import tempfile
 from datetime import datetime
 import shutil
+import uuid
 
 in_format = ('.mp4', '.avi', '.mkv', '.flv', '.rmvb', '.wmv',
              '.mov', '.mpg', '.mpeg', '.m4v', '.3gp', '.f4v', '.webm', '.ts')
@@ -73,14 +74,16 @@ def process_directory(input_dir, output_dir, delete_original, ffmpeg_args):
 
     video_files = [f for f in input_dir.rglob('*') if f.suffix.lower() in in_format and '@' not in str(f)]
 
-    for video_file in tqdm(video_files, desc="Converting videos", ncols=50):
+    parent_tmp_dir = f"/home/tosaki/temp_ffmpeg/"
+    os.makedirs(parent_tmp_dir, exist_ok=True)
+
+    for video_file in tqdm(video_files, desc="Converting", ncols=50):
         relative_path = video_file.relative_to(input_dir)
         target_file = output_dir / relative_path
         target_file = target_file.with_suffix('.mkv')
         target_file.parent.mkdir(parents=True, exist_ok=True)
 
-
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(dir=parent_tmp_dir) as temp_dir:
             temp_source = Path(temp_dir) / video_file.name
             temp_target = Path(temp_dir) / "ffmpeg_temp.mkv"
 
