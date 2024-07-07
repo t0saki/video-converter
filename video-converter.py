@@ -47,6 +47,7 @@ class FFmpegBatchConversionVideo:
     m_Video_Resolution = ''
     m_Video_CRF = ''
     m_Video_FrameRate = ''
+    m_ThreadCount = 12
 
     def __init__(self, videoformat=in_format, ffmpegOperatorEnum=FFmpegOperatorEnum.Modify_Video_BitRate):
         self.m_SupportVideoFormat = videoformat
@@ -144,7 +145,7 @@ class FFmpegBatchConversionVideo:
         # t_ffmpegcmdline = 'ffmpeg -loglevel error -stats -i "{}" -c:v libx265 -x265-params log-level=error -preset {}  -crf {} -pix_fmt yuv420p10le -c:a libopus -b:a 64k "{}"'.format(
         #     videoin, speed_present, self.m_Video_CRF, videoout)
         t_ffmpegcmdline = f"ffmpeg -loglevel error -stats -i \"{videoin}\" -c:v libsvtav1 -preset {
-            speed_present} -crf {self.m_Video_CRF} -pix_fmt yuv420p10le -c:a libopus -b:a 64k \"{videoout}\""
+            speed_present} -crf {self.m_Video_CRF} -pix_fmt yuv420p10le -c:a libopus -b:a 64k \"{videoout}\" -threads {self.m_ThreadCount}"
         # change shell title with filename
         os.system('xtitle ' + str(self.m_TotalConversionFiles) +
                   '/' + str(self.m_TotalFiles) + ' ' + os.path.split(videoin)[-1])
