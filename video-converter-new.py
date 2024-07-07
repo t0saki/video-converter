@@ -78,6 +78,8 @@ def process_directory(input_dir, output_dir, delete_original, ffmpeg_args):
     os.makedirs(parent_tmp_dir, exist_ok=True)
 
     for video_file in tqdm(video_files, desc="Converting", ncols=50):
+        logging.info(f"Start converting {video_file}")
+
         relative_path = video_file.relative_to(input_dir)
         target_file = output_dir / relative_path
         target_file = target_file.with_suffix('.mkv')
