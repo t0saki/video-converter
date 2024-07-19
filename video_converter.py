@@ -69,16 +69,36 @@ def copy_metadata(source_path, target_path):
 
         write_time = min(file_time, creation_time, modification_time)
 
-        # assert cmd_runner(cmd)
-        cmd = ['exiftool', '-TagsFromFile', str(source_path), '-DateTimeOriginal=' + min(file_time, creation_time, modification_time).strftime(
-            '%Y:%m:%d %H:%M:%S'), '-CreateDate=' + creation_time.strftime('%Y:%m:%d %H:%M:%S'), '-FileModifyDate=' + modification_time.strftime('%Y:%m:%d %H:%M:%S'), str(target_path), '-overwrite_original']
+        # get creation time from video metadata
+        # try:
+        #     result = subprocess.run(
+        #         ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream_tags=creation_time', '-of', 'default=noprint_wrappers=1:nokey=1', str(source_path)], capture_output=True, text=True)
+        #     if result.returncode == 0:
+        #         creation_time = datetime.strptime(
+        #             result.stdout.strip(), '%Y-%m-%dT%H:%M:%S.%fZ')
+        #         write_time = min(write_time, creation_time)
+        # except Exception as e:
+        #     # logging.error(f"Error getting creation time: {e}")
+        #     pass
+        try:
+            result = subprocess.check_output(
+                ["ffprobe", "-v", "quiet", "-show_format", "-print_format", "json", str(source_path)])
+            fields = json.loads(result)
+            creation_time = datetime.strptime(
+                fields['format']['tags']['creation_time'], '%Y-%m-%dT%H:%M:%S.%fZ')
+            write_time = min(write_time, creation_time)
+        except Exception as e:
+            pass
+
+            # assert cmd_runner(cmd)
+        cmd = ['exiftool', '-TagsFromFile', str(source_path), '-DateTimeOriginal=' + write_time.strftime(
+            '%Y:%m:%d %H:%M:%S'), '-CreateDate=' + write_time.strftime('%Y:%m:%d %H:%M:%S'), '-FileModifyDate=' + modification_time.strftime('%Y:%m:%d %H:%M:%S'), str(target_path), '-overwrite_original']
         assert cmd_runner(cmd)
 
-        cmd = ['exiftool', '-QuickTime:CreateDate=' + creation_time.strftime('%Y:%m:%d %H:%M:%S-%z'), '-QuickTime:ModifyDate=' + modification_time.strftime(
-            '%Y:%m:%d %H:%M:%S-%z'), '-QuickTime:TrackCreateDate=' + creation_time.strftime('%Y:%m:%d %H:%M:%S-%z'), '-QuickTime:TrackModifyDate=' + modification_time.strftime('%Y:%m:%d %H:%M:%S-%z'), str(target_path), '-overwrite_original']
+        cmd = ['exiftool', '-QuickTime:CreationDate=' + write_time.strftime('%Y:%m:%d %H:%M:%S-%z'), str(
+            target_path), '-overwrite_original']
         assert cmd_runner(cmd)
 
-        # subprocess.run(['exiftool', '-TagsFromFile', str(source_path), '-all:all', str(target_path), '-overwrite_original'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         cmd = ['exiftool', '-TagsFromFile',
                str(source_path), '-all:all', str(target_path), '-overwrite_original']
         assert cmd_runner(cmd)
@@ -102,6 +122,7 @@ def convert_video(source_path, target_path, ffmpeg_args):
         str(target_path)
     ]
     result = cmd_runner(cmd)
+    # result = True
     if result:
         source_duration = get_video_duration(str(source_path))
         target_duration = get_video_duration(str(target_path))

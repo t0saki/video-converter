@@ -42,45 +42,64 @@ def process_image(args):
         if filepath.suffix.lower() in ['.heic', '.heif']:
             # Convert HEIC or HEIF to PNG using ImageMagick
             png_filepath = filepath.with_suffix('.png')
-            magick_cmd = ['magick', str(filepath), '-compress', 'lossless',
-                          str(png_filepath)]
+            magick_cmd = ['magick', str(
+                filepath), '-compress', 'lossless', str(png_filepath)]
 
             assert cmd_runner(magick_cmd)
 
             filepath = png_filepath  # Use the PNG file for the rest of the process
             temp_png_created = True  # Set flag
 
-        # Check image resolution using ffprobe
-        ffprobe_process = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries',
-                                         'stream=width,height', '-of', 'csv=s=x:p=0', str(filepath)], capture_output=True, text=True)
-        width, height = map(int, ffprobe_process.stdout.strip().split('x'))
-        resolution = width * height
+        try:
+            # Check image resolution using ffprobe
+            ffprobe_process = subprocess.run(
+                ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries',
+                    'stream=width,height', '-of', 'csv=s=x:p=0', str(filepath)],
+                capture_output=True, text=True)
+            width, height = map(int, ffprobe_process.stdout.strip().split('x'))
+            resolution = width * height
 
-        cmd = ["ffmpeg", "-i", str(filepath)]
+            # Get image rotation info using exiftool
+            exiftool_process = subprocess.run(
+                ['exiftool', '-Orientation', '-n', str(filepath)],
+                capture_output=True, text=True)
+            orientation = exiftool_process.stdout.strip()
 
-        if resolution > max_resolution:
-            # If the resolution is greater than max_resolution, scale it down
-            # Calculate target resolution
-            target_width = round(width * (max_resolution / resolution) ** 0.5)
-            target_height = round(
-                height * (max_resolution / resolution) ** 0.5)
-            # cmd.extend(["-vf", f"scale={target_width}:{target_height}"])
-        else:
-            # If the resolution is within the limit, make sure both dimensions are even
-            target_width = width
-            target_height = height
+            # Adjust width and height based on rotation
+            if orientation in ['6', '8']:  # 6 = 90 CW, 8 = 270 CW
+                width, height = height, width
 
-        # # Ensure both width and height are even
-        # pad_filter = f"pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2"
-        # cmd.extend(["-vf", pad_filter])\
-        pad_filter = f"scale={
-            ceil(target_width/2)*2}:{ceil(target_height/2)*2}"
-        cmd.extend(["-vf", pad_filter])
+            cmd = ["ffmpeg", "-i", str(filepath)]
 
-        cmd.extend(["-c:v", "libsvtav1", "-crf", str(crf), "-still-picture", "1",
-                   str(target_path), "-cpu-used", "0", "-y", "-hide_banner", "-loglevel", "error"])
-        # ret = subprocess.run(cmd, stdout=subprocess.DEVNULL, check=True)
-        # ret.check_returncode()
+            if resolution > max_resolution:
+                # If the resolution is greater than max_resolution, scale it down
+                # Calculate target resolution
+                target_width = round(
+                    width * (max_resolution / resolution) ** 0.5)
+                target_height = round(
+                    height * (max_resolution / resolution) ** 0.5)
+            else:
+                # If the resolution is within the limit, make sure both dimensions are even
+                target_width = width
+                target_height = height
+
+            # Ensure both width and height are even
+            pad_filter = f"scale={
+                ceil(target_width/2)*2}:{ceil(target_height/2)*2}"
+            cmd.extend(["-vf", pad_filter])
+        except Exception as e:
+            logging.error(f"Error processing image resolution: {e}")
+
+        cmd.extend([
+            "-c:v", "libsvtav1",
+            "-crf", str(crf),
+            "-still-picture", "1",
+            str(target_path),
+            "-cpu-used", "0",
+            "-y",
+            "-hide_banner",
+            "-loglevel", "error"
+        ])
         assert cmd_runner(cmd)
 
         # Check if the image has DateTimeOriginal exif data using exiftool
