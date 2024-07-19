@@ -63,7 +63,7 @@ def process_image(args):
             exiftool_process = subprocess.run(
                 ['exiftool', '-Orientation', '-n', str(filepath)],
                 capture_output=True, text=True)
-            orientation = exiftool_process.stdout.strip()
+            orientation = exiftool_process.stdout.split(':')[1].strip()
 
             # Adjust width and height based on rotation
             if orientation in ['6', '8']:  # 6 = 90 CW, 8 = 270 CW
