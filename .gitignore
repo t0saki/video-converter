@@ -2,3 +2,4 @@
 core
 logs/*
 .vscode
+*.pyc

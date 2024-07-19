@@ -44,35 +44,87 @@ def get_video_duration(filename):
     # fps = eval(fields['r_frame_rate'])
     return duration_seconds  # , fps
 
+
+def cmd_runner(cmd):
+    try:
+        result = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        result.check_returncode()  # 检查命令是否执行成功
+        return result
+    except subprocess.CalledProcessError:
+        logging.error(f"Error running command {cmd}: {result.stderr}")
+        return False
+    except Exception as e:
+        logging.error(f"Error running command {cmd}: {e}")
+        return False
+
+
+def copy_metadata(source_path, target_path):
+    try:
+        # Copy all metadata from source to target
+        # Copy file time, creation time, modification time, and all exif data
+        file_time = datetime.fromtimestamp(source_path.stat().st_atime)
+        creation_time = datetime.fromtimestamp(source_path.stat().st_ctime)
+        modification_time = datetime.fromtimestamp(source_path.stat().st_mtime)
+
+        write_time = min(file_time, creation_time, modification_time)
+
+        # assert cmd_runner(cmd)
+        cmd = ['exiftool', '-TagsFromFile', str(source_path), '-DateTimeOriginal=' + min(file_time, creation_time, modification_time).strftime(
+            '%Y:%m:%d %H:%M:%S'), '-CreateDate=' + creation_time.strftime('%Y:%m:%d %H:%M:%S'), '-FileModifyDate=' + modification_time.strftime('%Y:%m:%d %H:%M:%S'), str(target_path), '-overwrite_original']
+        assert cmd_runner(cmd)
+
+        cmd = ['exiftool', '-QuickTime:CreateDate=' + creation_time.strftime('%Y:%m:%d %H:%M:%S-%z'), '-QuickTime:ModifyDate=' + modification_time.strftime(
+            '%Y:%m:%d %H:%M:%S-%z'), '-QuickTime:TrackCreateDate=' + creation_time.strftime('%Y:%m:%d %H:%M:%S-%z'), '-QuickTime:TrackModifyDate=' + modification_time.strftime('%Y:%m:%d %H:%M:%S-%z'), str(target_path), '-overwrite_original']
+        assert cmd_runner(cmd)
+
+        # subprocess.run(['exiftool', '-TagsFromFile', str(source_path), '-all:all', str(target_path), '-overwrite_original'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cmd = ['exiftool', '-TagsFromFile',
+               str(source_path), '-all:all', str(target_path), '-overwrite_original']
+        assert cmd_runner(cmd)
+
+        # Remove the backup file created by exiftool
+        backup_file = target_path.with_name(target_path.name + '_original')
+        if backup_file.exists():
+            backup_file.unlink()
+        # logging.info(f"Metadata copied from {source_path} to {target_path}")
+
+        os.utime(target_path, (file_time.timestamp(),
+                 modification_time.timestamp()))
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error copying metadata: {e}")
+
+
 def convert_video(source_path, target_path, ffmpeg_args):
     cmd = [
         'ffmpeg', '-i', str(source_path),
         *ffmpeg_args.split(),
         str(target_path)
     ]
-    try:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        result.check_returncode()  # 检查命令是否执行成功
-
+    result = cmd_runner(cmd)
+    if result:
         source_duration = get_video_duration(str(source_path))
         target_duration = get_video_duration(str(target_path))
         if abs(source_duration - target_duration) > 8:
-            raise ValueError("Duration mismatch")
-
+            logging.error(f"Duration mismatch: {
+                          source_duration} vs {target_duration}")
+            return False
+        copy_metadata(source_path, target_path)
         return True
-    except subprocess.CalledProcessError:
-        logging.error(f"Error converting {source_path}: {result.stderr}")
-        return False
-    except Exception as e:
-        logging.error(f"Error converting {source_path}: {e}")
-        return False
 
-def process_directory(input_dir, output_dir, delete_original, ffmpeg_args):
+
+def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='.mkv'):
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    video_files = [f for f in input_dir.rglob('*') if f.suffix.lower() in in_format and '@' not in str(f)]
+    video_files = [f for f in input_dir.rglob(
+        '*') if f.suffix.lower() in in_format and '@' not in str(f)]
+
+    # exempt live photos
+    live_photos = [f for f in video_files if f.with_suffix(
+        '.HEIC').exists() or f.with_suffix('.heic').exists()]
+    video_files = [f for f in video_files if f not in live_photos]
 
     parent_tmp_dir = f"/home/tosaki/temp_ffmpeg/"
     os.makedirs(parent_tmp_dir, exist_ok=True)
@@ -82,16 +134,17 @@ def process_directory(input_dir, output_dir, delete_original, ffmpeg_args):
 
         relative_path = video_file.relative_to(input_dir)
         target_file = output_dir / relative_path
-        target_file = target_file.with_suffix('.mkv')
+        target_file = target_file.with_suffix(ext)
         target_file.parent.mkdir(parents=True, exist_ok=True)
 
         with tempfile.TemporaryDirectory(dir=parent_tmp_dir) as temp_dir:
             temp_source = Path(temp_dir) / video_file.name
-            temp_target = Path(temp_dir) / "ffmpeg_temp.mkv"
+            temp_target = Path(temp_dir) / f"ffmpeg_temp{ext}"
 
             shutil.copy(video_file, temp_source)
-            convert_success = convert_video(temp_source, temp_target, ffmpeg_args)
-            
+            convert_success = convert_video(
+                temp_source, temp_target, ffmpeg_args)
+
             if convert_success:
                 shutil.move(temp_target, target_file)
                 if delete_original:
@@ -100,19 +153,24 @@ def process_directory(input_dir, output_dir, delete_original, ffmpeg_args):
             else:
                 logging.error(f"Failed to convert {video_file}")
 
-            
-
 
 def main():
-    parser = argparse.ArgumentParser(description="Batch convert videos with ffmpeg.")
-    parser.add_argument("input_dir", type=str, help="Input directory containing video files.")
-    parser.add_argument("output_dir", type=str, help="Output directory for converted videos.")
-    parser.add_argument("--delete", action='store_true', help="Delete original files after conversion.")
-    parser.add_argument("--ffmpeg_args", type=str, help="Additional arguments to pass to ffmpeg.", default="-loglevel error -stats -c:v libsvtav1 -preset 4 -crf 28 -pix_fmt yuv420p10le -c:a libopus -b:a 64k")
-    
+    parser = argparse.ArgumentParser(
+        description="Batch convert videos with ffmpeg.")
+    parser.add_argument("input_dir", type=str,
+                        help="Input directory containing video files.")
+    parser.add_argument("output_dir", type=str,
+                        help="Output directory for converted videos.")
+    parser.add_argument("--delete", action='store_true',
+                        help="Delete original files after conversion.")
+    parser.add_argument("--ffmpeg_args", type=str, help="Additional arguments to pass to ffmpeg.",
+                        default="-loglevel error -stats -c:v libsvtav1 -preset 4 -crf 28 -pix_fmt yuv420p10le -c:a libopus -b:a 64k")
+
     args = parser.parse_args()
 
-    process_directory(args.input_dir, args.output_dir, args.delete, args.ffmpeg_args)
+    process_directory(args.input_dir, args.output_dir,
+                      args.delete, args.ffmpeg_args)
+
 
 if __name__ == "__main__":
     setup_logging()
