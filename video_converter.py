@@ -69,6 +69,10 @@ def copy_metadata(source_path, target_path):
 
         write_time = min(file_time, creation_time, modification_time)
 
+        # set timezone for write_time
+        if write_time.tzinfo is None:
+            write_time = write_time.replace(
+                tzinfo=datetime.now().astimezone().tzinfo)
         # get creation time from video metadata
         # try:
         #     result = subprocess.run(

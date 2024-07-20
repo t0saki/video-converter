@@ -50,6 +50,7 @@ def process_image(args):
             filepath = png_filepath  # Use the PNG file for the rest of the process
             temp_png_created = True  # Set flag
 
+        cmd = ["ffmpeg", "-i", str(filepath)]
         try:
             # Check image resolution using ffprobe
             ffprobe_process = subprocess.run(
@@ -69,8 +70,6 @@ def process_image(args):
             if orientation in ['6', '8']:  # 6 = 90 CW, 8 = 270 CW
                 width, height = height, width
 
-            cmd = ["ffmpeg", "-i", str(filepath)]
-
             if resolution > max_resolution:
                 # If the resolution is greater than max_resolution, scale it down
                 # Calculate target resolution
@@ -86,10 +85,11 @@ def process_image(args):
             # Ensure both width and height are even
             pad_filter = f"scale={
                 ceil(target_width/2)*2}:{ceil(target_height/2)*2}"
-            cmd.extend(["-vf", pad_filter])
         except Exception as e:
             logging.error(f"Error processing image resolution: {e}")
+            pad_filter = "scale=ceil(iw/2)*2:ceil(ih/2)*2"
 
+        cmd.extend(["-vf", pad_filter])
         cmd.extend([
             "-c:v", "libsvtav1",
             "-crf", str(crf),
