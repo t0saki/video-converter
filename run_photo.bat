@@ -1,1 +1,1 @@
-python photo_converter.py "Z:\Photos" "D:\Temp\photos_conv\output" --max_workers 8
+python photo_converter.py "Z:\Photos" "D:\Temp\photos_conv\output" --max_workers 4

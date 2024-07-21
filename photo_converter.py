@@ -92,7 +92,7 @@ def process_image(args):
         cmd.extend(["-vf", pad_filter])
         cmd.extend([
             "-c:v", "libsvtav1",
-            "-preset", "4",
+            "-preset", "2",
             "-pix_fmt", "yuv420p10le",
             "-crf", str(crf),
             "-still-picture", "1",
