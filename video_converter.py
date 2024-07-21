@@ -115,7 +115,7 @@ def copy_metadata(source_path, target_path):
 
         os.utime(target_path, (file_time.timestamp(),
                  modification_time.timestamp()))
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         logging.error(f"Error copying metadata: {e}")
 
 
@@ -138,7 +138,7 @@ def convert_video(source_path, target_path, ffmpeg_args):
         return True
 
 
-def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='.mkv'):
+def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='.mp4'):
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
