@@ -69,54 +69,99 @@ def copy_metadata(source_path, target_path):
 
         write_time = min(file_time, creation_time, modification_time)
 
-        # set timezone for write_time
-        if write_time.tzinfo is None:
-            write_time = write_time.replace(
-                tzinfo=datetime.now().astimezone().tzinfo)
-        # get creation time from video metadata
-        # try:
-        #     result = subprocess.run(
-        #         ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream_tags=creation_time', '-of', 'default=noprint_wrappers=1:nokey=1', str(source_path)], capture_output=True, text=True)
-        #     if result.returncode == 0:
-        #         creation_time = datetime.strptime(
-        #             result.stdout.strip(), '%Y-%m-%dT%H:%M:%S.%fZ')
-        #         write_time = min(write_time, creation_time)
-        # except Exception as e:
-        #     # logging.error(f"Error getting creation time: {e}")
-        #     pass
+        os.utime(target_path, (file_time.timestamp(),
+                 modification_time.timestamp()))
+
+    #     # set timezone for write_time
+    #     if write_time.tzinfo is None:
+    #         write_time = write_time.replace(
+    #             tzinfo=datetime.now().astimezone().tzinfo)
+    #     # get creation time from video metadata
+    #     # try:
+    #     #     result = subprocess.run(
+    #     #         ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream_tags=creation_time', '-of', 'default=noprint_wrappers=1:nokey=1', str(source_path)], capture_output=True, text=True)
+    #     #     if result.returncode == 0:
+    #     #         creation_time = datetime.strptime(
+    #     #             result.stdout.strip(), '%Y-%m-%dT%H:%M:%S.%fZ')
+    #     #         write_time = min(write_time, creation_time)
+    #     # except Exception as e:
+    #     #     # logging.error(f"Error getting creation time: {e}")
+    #     #     pass
+    #     try:
+    #         result = subprocess.check_output(
+    #             ["ffprobe", "-v", "quiet", "-show_format", "-print_format", "json", str(source_path)])
+    #         fields = json.loads(result)
+    #         creation_time = datetime.strptime(
+    #             fields['format']['tags']['creation_time'], '%Y-%m-%dT%H:%M:%S.%fZ')
+    #         write_time = min(write_time, creation_time)
+    #     except Exception as e:
+    #         pass
+
+    #         # assert cmd_runner(cmd)
+    #     cmd = ['exiftool', '-TagsFromFile', str(source_path), '-DateTimeOriginal=' + write_time.strftime(
+    #         '%Y:%m:%d %H:%M:%S'), '-CreateDate=' + write_time.strftime('%Y:%m:%d %H:%M:%S'), '-FileModifyDate=' + modification_time.strftime('%Y:%m:%d %H:%M:%S'), str(target_path), '-overwrite_original']
+    #     assert cmd_runner(cmd)
+
+    #     cmd = ['exiftool', '-TagsFromFile',
+    #            str(source_path), '-all:all', str(target_path), '-overwrite_original']
+    #     assert cmd_runner(cmd)
+
+    #     # DateTimeOriginal
+    #     if 'DateTimeOriginal' not in subprocess.run(['exiftool', '-DateTimeOriginal', str(target_path), '-m'], capture_output=True, text=True).stdout:
+    #         cmd = ['exiftool', '-DateTimeOriginal=' + write_time.strftime(
+    #             '%Y:%m:%d %H:%M:%S'), str(target_path), '-overwrite_original']
+    #         assert cmd_runner(cmd)
+
+    #     # Remove the backup file created by exiftool
+    #     backup_file = target_path.with_name(target_path.name + '_original')
+    #     if backup_file.exists():
+    #         backup_file.unlink()
+    #     # logging.info(f"Metadata copied from {source_path} to {target_path}")
+
+    except Exception as e:
+        logging.error(f"Error copying metadata: {e}")
+    # 检查原图片是否有exif信息
+    try:
+        exif_info = subprocess.check_output(
+            ['exiftool', '-j', source_path])
+    except subprocess.CalledProcessError:
+        exif_info = None
+
+    def write_exif():
+        # 将文件时间写入目标图片的exif信息
         try:
-            result = subprocess.check_output(
-                ["ffprobe", "-v", "quiet", "-show_format", "-print_format", "json", str(source_path)])
-            fields = json.loads(result)
-            creation_time = datetime.strptime(
-                fields['format']['tags']['creation_time'], '%Y-%m-%dT%H:%M:%S.%fZ')
-            write_time = min(write_time, creation_time)
-        except Exception as e:
-            pass
+            subprocess.run(['exiftool', f'-DateTimeOriginal={write_time.strftime('%Y:%m:%d %H:%M:%S')}', f'-CreateDate={write_time.strftime(
+                '%Y:%m:%d %H:%M:%S')}', f'-ModifyDate={write_time.strftime('%Y:%m:%d %H:%M:%S')}', '-overwrite_original', target_path], check=True)
+        except subprocess.CalledProcessError as e:
+            # print(f"Error writing EXIF data: {e}")
+            logging.error(f"Error writing EXIF data: {e}")
 
-            # assert cmd_runner(cmd)
-        cmd = ['exiftool', '-TagsFromFile', str(source_path), '-DateTimeOriginal=' + write_time.strftime(
-            '%Y:%m:%d %H:%M:%S'), '-CreateDate=' + write_time.strftime('%Y:%m:%d %H:%M:%S'), '-FileModifyDate=' + modification_time.strftime('%Y:%m:%d %H:%M:%S'), str(target_path), '-overwrite_original']
-        assert cmd_runner(cmd)
+    if exif_info:
+        # 复制所有的exif信息到目标图片
+        try:
+            subprocess.run(['exiftool', '-tagsFromFile', source_path,
+                           '-all:all', '-overwrite_original', target_path], check=True)
+            # if no DateTimeOriginal:
+            # if 'DateTimeOriginal' not in subprocess.run(['exiftool', '-DateTimeOriginal', str(target_path), '-m'], capture_output=True, text=True).stdout
+            exif_info_json = json.loads(exif_info.decode())[0]
+            if 'DateTimeOriginal' not in exif_info_json:
+                cmd = ['exiftool', '-DateTimeOriginal=' + write_time.strftime(
+                    '%Y:%m:%d %H:%M:%S'), str(target_path), '-overwrite_original']
+                assert cmd_runner(cmd)
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Error copying EXIF data: {e}")
+            write_exif()
+    else:
+        write_exif()
 
+    # if is video and no QuickTime:CreationDate:
+    if target_path.suffix.lower() in in_format and 'Creation Date' not in subprocess.run(['exiftool', '-QuickTime:CreationDate', str(target_path), '-m'], capture_output=True, text=True).stdout:
         cmd = ['exiftool', '-QuickTime:CreationDate=' + write_time.strftime('%Y:%m:%d %H:%M:%S-%z'), str(
             target_path), '-overwrite_original']
         assert cmd_runner(cmd)
 
-        cmd = ['exiftool', '-TagsFromFile',
-               str(source_path), '-all:all', str(target_path), '-overwrite_original']
-        assert cmd_runner(cmd)
-
-        # Remove the backup file created by exiftool
-        backup_file = target_path.with_name(target_path.name + '_original')
-        if backup_file.exists():
-            backup_file.unlink()
-        # logging.info(f"Metadata copied from {source_path} to {target_path}")
-
-        os.utime(target_path, (file_time.timestamp(),
-                 modification_time.timestamp()))
-    except Exception as e:
-        logging.error(f"Error copying metadata: {e}")
+    os.utime(target_path, (file_time.timestamp(),
+                           modification_time.timestamp()))
 
 
 def convert_video(source_path, target_path, ffmpeg_args):
@@ -163,6 +208,11 @@ def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='
         target_file.parent.mkdir(parents=True, exist_ok=True)
 
         with tempfile.TemporaryDirectory(dir=parent_tmp_dir) as temp_dir:
+            # detect if target file already exists
+            if target_file.exists():
+                logging.info(f"Target file already exists: {target_file}")
+                continue
+
             temp_source = Path(temp_dir) / video_file.name
             temp_target = Path(temp_dir) / f"ffmpeg_temp{ext}"
 

@@ -1,3 +1,4 @@
+import tempfile
 from video_converter import setup_logging, process_directory, cmd_runner, copy_metadata
 import logging
 import traceback
@@ -7,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tqdm import tqdm
 import argparse
-from math import ceil
+from math import ceil, trunc
 
 parser = argparse.ArgumentParser(description='Convert images to AVIF format')
 parser.add_argument('source_dir', type=str, help='Source directory')
@@ -28,26 +29,22 @@ image_extensions = ('.png', '.jpg', '.jpeg', '.webp',
                     '.heic', '.heif', '.gif', '.tiff', '.tif')
 
 
-def process_image(args):
-    filepath, source_dir, target_dir, crf, max_resolution = args
-    relative_path = filepath.relative_to(source_dir)
-    target_path = target_dir / relative_path
-    target_path = target_path.with_suffix('.avif')
-
+def convert_img_to_avif(filepath, target_path, crf, max_resolution):
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
-
         temp_png_created = False  # Flag to track if a temp PNG file is created
 
         if filepath.suffix.lower() in ['.heic', '.heif']:
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_png:
+                temp_png_filepath = Path(temp_png.name)
+
             # Convert HEIC or HEIF to PNG using ImageMagick
-            png_filepath = filepath.with_suffix('.png')
-            magick_cmd = ['magick', str(
-                filepath), '-compress', 'lossless', str(png_filepath)]
+            magick_cmd = ['magick', str(filepath), '-compress',
+                          'lossless', str(temp_png_filepath)]
 
             assert cmd_runner(magick_cmd)
 
-            filepath = png_filepath  # Use the PNG file for the rest of the process
+            filepath = temp_png_filepath  # Use the PNG file for the rest of the process
             temp_png_created = True  # Set flag
 
         cmd = ["ffmpeg", "-i", str(filepath)]
@@ -60,15 +57,18 @@ def process_image(args):
             width, height = map(int, ffprobe_process.stdout.strip().split('x'))
             resolution = width * height
 
-            # Get image rotation info using exiftool
-            exiftool_process = subprocess.run(
-                ['exiftool', '-Orientation', '-n', str(filepath)],
-                capture_output=True, text=True)
-            orientation = exiftool_process.stdout.split(':')[1].strip()
+            try:
+                # Get image rotation info using exiftool
+                exiftool_process = subprocess.run(
+                    ['exiftool', '-Orientation', '-n', str(filepath)],
+                    capture_output=True, text=True)
+                orientation = exiftool_process.stdout.split(':')[1].strip()
 
-            # Adjust width and height based on rotation
-            if orientation in ['6', '8']:  # 6 = 90 CW, 8 = 270 CW
-                width, height = height, width
+                # Adjust width and height based on rotation
+                if orientation in ['6', '8']:  # 6 = 90 CW, 8 = 270 CW
+                    width, height = height, width
+            except Exception:
+                pass
 
             if resolution > max_resolution:
                 # If the resolution is greater than max_resolution, scale it down
@@ -84,49 +84,90 @@ def process_image(args):
 
             # Ensure both width and height are even
             pad_filter = f"scale={
-                ceil(target_width/2)*2}:{ceil(target_height/2)*2}"
+                trunc(target_width/2)*2}:{trunc(target_height/2)*2}"
         except Exception as e:
             logging.error(f"Error processing image resolution: {e}")
-            pad_filter = "scale=ceil(iw/2)*2:ceil(ih/2)*2"
+            pad_filter = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
 
         cmd.extend(["-vf", pad_filter])
-        cmd.extend([
-            "-c:v", "libsvtav1",
-            "-preset", "2",
+
+        cmd_aomav1 = cmd + [
+            "-c:v", "libaom-av1",
+            "-cpu-used", "1",
             "-pix_fmt", "yuv420p10le",
             "-crf", str(crf),
             "-still-picture", "1",
             str(target_path),
-            "-cpu-used", "0",
             "-y",
             "-hide_banner",
             "-loglevel", "error"
-        ])
-        assert cmd_runner(cmd)
+        ]
 
-        # Check if the image has DateTimeOriginal exif data using exiftool
-        exiftool_process = subprocess.run(
-            ['exiftool', '-DateTimeOriginal', str(filepath), '-m'], capture_output=True, text=True)
+        # cmd_svtav1 = cmd + [
+        #     "-c:v", "libsvtav1",
+        #     "-preset", "4",
+        #     "-crf", str(crf),
+        #     "-pix_fmt", "yuv420p10le",
+        #     "-still-picture", "1",
+        #     str(target_path),
+        #     "-y",
+        #     "-hide_banner",
+        #     "-loglevel", "error"
+        # ]
 
-        exif_output = exiftool_process.stdout
+        if not cmd_runner(cmd_aomav1):
+            # if True:
+            # use webp if av1 fails
+            logging.warning(
+                f"av1 failed for {filepath}, using webp instead.")
+            target_path = target_path.with_suffix('.webp')
+            cmd_webp = cmd + [
+                "-c:v", "libwebp",
+                "-lossless", "0",
+                "-compression_level", "6",
+                "-quality", "80",
+                "-preset", "picture",
+                str(target_path),
+                "-y",
+                "-hide_banner",
+                "-loglevel", "error"
+            ]
+            assert cmd_runner(cmd_webp)
 
-        if 'DateTimeOriginal' not in exif_output:
-            # If there is no DateTimeOriginal data, set it to the file's modification time
-            mod_time = datetime.datetime.fromtimestamp(
-                filepath.stat().st_mtime)
-            mod_time_str = mod_time.strftime('%Y:%m:%d %H:%M:%S')
-            subprocess.run(['exiftool', '-DateTimeOriginal=' + mod_time_str,
-                           str(target_path), '-m'], check=True, stdout=subprocess.DEVNULL)
+            if temp_png_created:
+                filepath.unlink()
 
-        # Copy all other exif data
-        copy_metadata(filepath, target_path)
+        return True
+    except Exception:
+        logging.error(f"Error processing image {
+                      filepath}: {traceback.format_exc()}")
+        return False
+
+
+def process_image(args):
+    filepath, source_dir, target_dir, crf, max_resolution = args
+    relative_path = filepath.relative_to(source_dir)
+    target_path = target_dir / relative_path
+    target_path = target_path.with_suffix('.avif')
+
+    try:
+        def detect_exists(filepath):
+            if filepath.with_suffix('.avif').exists() and filepath.with_suffix('.avif').stat().st_size > 0:
+                return True
+            if filepath.with_suffix('.webp').exists() and filepath.with_suffix('.webp').stat().st_size > 0:
+                return True
+            return False
+
+        if not detect_exists(target_path):
+            convert_img_to_avif(filepath, target_path, crf, max_resolution)
+
+            # Copy all other exif data
+            copy_metadata(filepath, target_path)
 
         # Remove "_original" backup file created by exiftool
         backup_file = target_path.with_name(target_path.name + '_original')
         if backup_file.exists():
             backup_file.unlink()
-        if temp_png_created:
-            filepath.unlink()
     except Exception:
         logging.error(f"Error processing image {
                       filepath}: {traceback.format_exc()}")
@@ -152,7 +193,8 @@ def convert_images(source_dir, target_dir, crf, max_resolution, max_workers=1):
         list(tqdm(executor.map(process_image, [(image_file, source_dir, target_dir, crf, max_resolution)
              for image_file in image_files]), total=len(image_files), ncols=80))
     # for image_file in tqdm(image_files, desc="Converting", ncols=50):
-    #     process_image((image_file, source_dir, target_dir, crf, max_resolution))
+    #     process_image(
+    #         (image_file, source_dir, target_dir, crf, max_resolution))
 
     # Convert videos
     process_directory(source_dir, target_dir,
