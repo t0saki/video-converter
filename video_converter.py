@@ -72,52 +72,6 @@ def copy_metadata(source_path, target_path):
         os.utime(target_path, (file_time.timestamp(),
                  modification_time.timestamp()))
 
-    #     # set timezone for write_time
-    #     if write_time.tzinfo is None:
-    #         write_time = write_time.replace(
-    #             tzinfo=datetime.now().astimezone().tzinfo)
-    #     # get creation time from video metadata
-    #     # try:
-    #     #     result = subprocess.run(
-    #     #         ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream_tags=creation_time', '-of', 'default=noprint_wrappers=1:nokey=1', str(source_path)], capture_output=True, text=True)
-    #     #     if result.returncode == 0:
-    #     #         creation_time = datetime.strptime(
-    #     #             result.stdout.strip(), '%Y-%m-%dT%H:%M:%S.%fZ')
-    #     #         write_time = min(write_time, creation_time)
-    #     # except Exception as e:
-    #     #     # logging.error(f"Error getting creation time: {e}")
-    #     #     pass
-    #     try:
-    #         result = subprocess.check_output(
-    #             ["ffprobe", "-v", "quiet", "-show_format", "-print_format", "json", str(source_path)])
-    #         fields = json.loads(result)
-    #         creation_time = datetime.strptime(
-    #             fields['format']['tags']['creation_time'], '%Y-%m-%dT%H:%M:%S.%fZ')
-    #         write_time = min(write_time, creation_time)
-    #     except Exception as e:
-    #         pass
-
-    #         # assert cmd_runner(cmd)
-    #     cmd = ['exiftool', '-TagsFromFile', str(source_path), '-DateTimeOriginal=' + write_time.strftime(
-    #         '%Y:%m:%d %H:%M:%S'), '-CreateDate=' + write_time.strftime('%Y:%m:%d %H:%M:%S'), '-FileModifyDate=' + modification_time.strftime('%Y:%m:%d %H:%M:%S'), str(target_path), '-overwrite_original']
-    #     assert cmd_runner(cmd)
-
-    #     cmd = ['exiftool', '-TagsFromFile',
-    #            str(source_path), '-all:all', str(target_path), '-overwrite_original']
-    #     assert cmd_runner(cmd)
-
-    #     # DateTimeOriginal
-    #     if 'DateTimeOriginal' not in subprocess.run(['exiftool', '-DateTimeOriginal', str(target_path), '-m'], capture_output=True, text=True).stdout:
-    #         cmd = ['exiftool', '-DateTimeOriginal=' + write_time.strftime(
-    #             '%Y:%m:%d %H:%M:%S'), str(target_path), '-overwrite_original']
-    #         assert cmd_runner(cmd)
-
-    #     # Remove the backup file created by exiftool
-    #     backup_file = target_path.with_name(target_path.name + '_original')
-    #     if backup_file.exists():
-    #         backup_file.unlink()
-    #     # logging.info(f"Metadata copied from {source_path} to {target_path}")
-
     except Exception as e:
         logging.error(f"Error copying metadata: {e}")
     # 检查原图片是否有exif信息
@@ -126,6 +80,15 @@ def copy_metadata(source_path, target_path):
             ['exiftool', '-j', source_path])
     except subprocess.CalledProcessError:
         exif_info = None
+
+    # try:
+    #     # "Recorded_Date": "2023-09-26T03:38:24+0800",
+    #     # "Encoded_Date": "UTC 2022-12-09 12:07:17",
+    #     # "Tagged_Date": "UTC 2022-12-09 12:07:17",
+    #     if 'Recorded_Date' in exif_info.decode():
+    #         recorded_date = json.loads(exif_info.decode())[0]['Recorded_Date']
+    #         write_time = datetime.strptime(
+    #             recorded_date, '%Y-%m-%dT%H:%M:%S%z')
 
     def write_exif():
         # 将文件时间写入目标图片的exif信息
@@ -155,13 +118,46 @@ def copy_metadata(source_path, target_path):
         write_exif()
 
     # if is video and no QuickTime:CreationDate:
-    if target_path.suffix.lower() in in_format and 'Creation Date' not in subprocess.run(['exiftool', '-QuickTime:CreationDate', str(target_path), '-m'], capture_output=True, text=True).stdout:
+    if target_path.suffix.lower() in in_format and 'Creation Date' not in subprocess.run(['exiftool', '-QuickTime:CreationDate', str(source_path), '-m'], capture_output=True, text=True).stdout:
+        def try_get_time(exiftime_list, exif_info_json, key):
+            if key in exif_info_json:
+                try:
+                    if '+' in exif_info_json[key]:
+                        format = '%Y:%m:%d %H:%M:%S%z'
+                    else:
+                        format = '%Y:%m:%d %H:%M:%S'
+                    exiftime_list.append(datetime.strptime(
+                        exif_info_json[key], format))
+                except ValueError:
+                    pass
+            return exiftime_list
+        exiftime = [write_time]
+        exiftime = try_get_time(exiftime, exif_info_json, 'FileModifyDate')
+        exiftime = try_get_time(exiftime, exif_info_json, 'FileAccessDate')
+        exiftime = try_get_time(exiftime, exif_info_json, 'FileCreateDate')
+        exiftime = try_get_time(exiftime, exif_info_json, 'CreateDate')
+        exiftime = try_get_time(exiftime, exif_info_json, 'ModifyDate')
+        exiftime = try_get_time(exiftime, exif_info_json, 'DateTimeOriginal')
+        exiftime = try_get_time(exiftime, exif_info_json, 'CreationDate')
+
+        # add default time zone local
+        for i in range(len(exiftime)):
+            if exiftime[i].tzinfo is None:
+                exiftime[i] = exiftime[i].replace(
+                    tzinfo=datetime.now().astimezone().tzinfo)
+        write_time = min(exiftime)
+
         cmd = ['exiftool', '-QuickTime:CreationDate=' + write_time.strftime('%Y:%m:%d %H:%M:%S-%z'), str(
             target_path), '-overwrite_original']
         assert cmd_runner(cmd)
 
-    os.utime(target_path, (file_time.timestamp(),
-                           modification_time.timestamp()))
+        if 'DateTimeOriginal' not in exif_info_json:
+            cmd = ['exiftool', '-DateTimeOriginal=' + write_time.strftime(
+                '%Y:%m:%d %H:%M:%S'), str(target_path), '-overwrite_original']
+            assert cmd_runner(cmd)
+
+    os.utime(target_path, (write_time.timestamp(),
+                           write_time.timestamp()))
 
 
 def convert_video(source_path, target_path, ffmpeg_args):
@@ -179,7 +175,6 @@ def convert_video(source_path, target_path, ffmpeg_args):
             logging.error(f"Duration mismatch: {
                           source_duration} vs {target_duration}")
             return False
-        copy_metadata(source_path, target_path)
         return True
 
 
@@ -211,6 +206,7 @@ def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='
             # detect if target file already exists
             if target_file.exists():
                 logging.info(f"Target file already exists: {target_file}")
+                copy_metadata(video_file, target_file)
                 continue
 
             temp_source = Path(temp_dir) / video_file.name
@@ -222,9 +218,11 @@ def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='
 
             if convert_success:
                 shutil.move(temp_target, target_file)
+                copy_metadata(video_file, target_file)
                 if delete_original:
                     os.remove(video_file)
                 logging.info(f"Converted {video_file}")
+
             else:
                 logging.error(f"Failed to convert {video_file}")
 
