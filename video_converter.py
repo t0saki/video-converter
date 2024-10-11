@@ -171,7 +171,7 @@ def convert_video(source_path, target_path, ffmpeg_args):
     if result:
         source_duration = get_video_duration(str(source_path))
         target_duration = get_video_duration(str(target_path))
-        if abs(source_duration - target_duration) > 8:
+        if abs(source_duration - target_duration) / source_duration > 0.05:
             logging.error(f"Duration mismatch: {
                           source_duration} vs {target_duration}")
             return False

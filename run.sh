@@ -1,4 +1,7 @@
 #!/bin/bash
+
+export PATH="/home/tosaki/ffmpeg-psy/bin:$PATH"
+export LD_LIBRARY_PATH="/home/tosaki/ffmpeg-psy/lib:$LD_LIBRARY_PATH"
 export SVT_LOG=1
 # nice -n 15 python video-converter.py
 rm -r ~/temp_ffmpeg/*
