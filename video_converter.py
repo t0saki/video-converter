@@ -99,6 +99,7 @@ def copy_metadata(source_path, target_path):
             # print(f"Error writing EXIF data: {e}")
             logging.error(f"Error writing EXIF data: {e}")
 
+    exif_info_json = {}
     if exif_info:
         # 复制所有的exif信息到目标图片
         try:
@@ -160,36 +161,142 @@ def copy_metadata(source_path, target_path):
                            write_time.timestamp()))
 
 
-def convert_video(source_path, target_path, ffmpeg_args):
+def is_rotated_video_ffprobe(video_file):
+    try:
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream_tags=rotate',
+            '-of', 'default=nw=1:nk=1',
+            str(video_file)
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logging.error(f"无法获取视频 {video_file} 的旋转信息")
+            return False
+
+        rotation = result.stdout.strip()
+        if rotation == '':
+            rotation = 0
+        else:
+            rotation = int(rotation)
+
+        if rotation in [90, 270]:
+            return True
+        else:
+            return False
+
+    except Exception as e:
+        logging.error(f"检查视频旋转时出错: {e}")
+        return False
+
+
+def is_rotated_video_exiftool(video_file):
+    import re
+    try:
+        cmd = [
+            'exiftool',
+            '-n',
+            '-Rotation',
+            str(video_file)
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logging.error(f"无法获取视频 {video_file} 的旋转信息")
+            return False
+
+        output = result.stdout.strip()
+        rotation = 0
+        if output:
+            match = re.search(r'Rotation\s*:\s*(\d+)', output)
+            if match:
+                rotation = int(match.group(1))
+
+        if rotation in [90, 270]:
+            return True
+        else:
+            return False
+
+    except Exception as e:
+        logging.error(f"检查视频旋转时出错: {e}")
+        return False
+
+def is_rotated_video(video_file):
+    return is_rotated_video_ffprobe(video_file) or is_rotated_video_exiftool(video_file)
+
+def convert_video(source_path, target_path, ffmpeg_args, max_resolution=None):
+    # 获取源视频的分辨率
+    scale_filter = ""
+    try:
+        probe_result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries',
+             'stream=width,height', '-of', 'csv=s=x:p=0', str(source_path)],
+            capture_output=True, text=True
+        )
+        if probe_result.returncode != 0:
+            logging.error(f"Failed to get video resolution for {source_path}")
+            return False
+
+        width, height = map(int, probe_result.stdout.strip().split('x')[:2])
+        resolution = width * height
+
+        # 动态计算目标宽高
+        if max_resolution and resolution > max_resolution:
+            if is_rotated_video(source_path):
+                width, height = height, width
+
+            scale_factor = (max_resolution / resolution) ** 0.5
+            target_width = round(width * scale_factor)
+            target_height = round(height * scale_factor)
+
+            # 确保宽高为偶数
+            if target_width % 2 != 0:
+                target_width += 1
+            if target_height % 2 != 0:
+                target_height += 1
+
+            scale_filter = f"-vf scale={target_width}:{target_height}"
+        else:
+            scale_filter = ""
+    except Exception as e:
+        logging.error(f"Error getting video resolution: {e}")
+
+    # 构建 ffmpeg 命令
     cmd = [
-        'ffmpeg', '-i', str(source_path),
+        'ffmpeg',
+        '-i',
+        str(source_path),
         *ffmpeg_args.split(),
+        *scale_filter.split(),
         str(target_path)
     ]
     result = cmd_runner(cmd)
-    # result = True
+
+    # 验证转换是否成功
     if result:
         source_duration = get_video_duration(str(source_path))
         target_duration = get_video_duration(str(target_path))
-        if abs(source_duration - target_duration) / source_duration > 0.05:
+        if (source_duration == 0 or abs(source_duration - target_duration) / source_duration > 0.05) and (source_duration - target_duration > 1):
             logging.error(f"Duration mismatch: {
                           source_duration} vs {target_duration}")
             return False
         return True
 
 
-def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='.mp4'):
+def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='.mp4', max_resolution=3840*2160, all_files=None):
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    video_files = [f for f in input_dir.rglob(
-        '*') if f.suffix.lower() in in_format and '@' not in str(f)]
+    if all_files is None:
+        all_files = [f for f in input_dir.rglob('*') if '@eaDir' not in str(f)]
 
-    # exempt live photos
-    live_photos = [f for f in video_files if f.with_suffix(
-        '.HEIC').exists() or f.with_suffix('.heic').exists()]
-    video_files = [f for f in video_files if f not in live_photos]
+    video_files = [f for f in all_files if f.suffix.lower() in in_format]
+
+    # # 排除 Live Photos 的视频文件
+    # live_photos = [f for f in video_files if f.with_suffix(
+    #     '.HEIC').exists() or f.with_suffix('.heic').exists()]
+    # video_files = [f for f in video_files if f not in live_photos]
 
     parent_tmp_dir = f"/home/tosaki/temp_ffmpeg/"
     os.makedirs(parent_tmp_dir, exist_ok=True)
@@ -203,7 +310,7 @@ def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='
         target_file.parent.mkdir(parents=True, exist_ok=True)
 
         with tempfile.TemporaryDirectory(dir=parent_tmp_dir) as temp_dir:
-            # detect if target file already exists
+            # 检查目标文件是否已存在
             if target_file.exists():
                 logging.info(f"Target file already exists: {target_file}")
                 copy_metadata(video_file, target_file)
@@ -214,7 +321,8 @@ def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='
 
             shutil.copy(video_file, temp_source)
             convert_success = convert_video(
-                temp_source, temp_target, ffmpeg_args)
+                temp_source, temp_target, ffmpeg_args, max_resolution
+            )
 
             if convert_success:
                 shutil.move(temp_target, target_file)
@@ -238,11 +346,13 @@ def main():
                         help="Delete original files after conversion.")
     parser.add_argument("--ffmpeg_args", type=str, help="Additional arguments to pass to ffmpeg.",
                         default="-loglevel error -stats -c:v libsvtav1 -preset 4 -crf 28 -pix_fmt yuv420p10le -c:a libopus -b:a 64k")
+    parser.add_argument("--max_resolution", type=int,
+                        help="Maximum resolution (in pixels).")
 
     args = parser.parse_args()
 
     process_directory(args.input_dir, args.output_dir,
-                      args.delete, args.ffmpeg_args)
+                      args.delete, args.ffmpeg_args, max_resolution=args.max_resolution)
 
 
 if __name__ == "__main__":
