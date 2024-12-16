@@ -345,7 +345,7 @@ def main():
     parser.add_argument("--delete", action='store_true',
                         help="Delete original files after conversion.")
     parser.add_argument("--ffmpeg_args", type=str, help="Additional arguments to pass to ffmpeg.",
-                        default="-loglevel error -stats -c:v libsvtav1 -preset 6 -crf 28 -pix_fmt yuv420p10le -c:a libopus -b:a 64k")
+                        default="-loglevel error -stats -c:v libsvtav1 -preset 8 -crf 36 -pix_fmt yuv420p10le -svtav1-params film-grain=8 -svtav1-params adaptive-film-grain=1 -c:a libopus -b:a 64k")
     parser.add_argument("--max_resolution", type=int,
                         help="Maximum resolution (in pixels).")
 
