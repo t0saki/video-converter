@@ -20,14 +20,12 @@ def setup_logging():
     log_dir.mkdir(exist_ok=True)
     log_filename = datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log')
     log_filepath = log_dir / log_filename
-
     logging.basicConfig(
         filename=log_filepath,
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-
     console = logging.StreamHandler()
     console.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -49,8 +47,8 @@ def cmd_runner(cmd):
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         result.check_returncode()
         return result
-    except subprocess.CalledProcessError:
-        logging.error(f"Error running command {cmd}: {result.stderr if 'result' in locals() else ''}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error running command {cmd}: {e.stderr}")
         return False
     except Exception as e:
         logging.error(f"Error running command {cmd}: {e}")
@@ -66,7 +64,6 @@ def copy_metadata(source_path, target_path):
         os.utime(target_path, (file_time.timestamp(), modification_time.timestamp()))
     except Exception as e:
         logging.error(f"Error copying metadata: {e}")
-
     try:
         exif_info = subprocess.check_output(['exiftool', '-j', source_path])
     except subprocess.CalledProcessError:
@@ -96,16 +93,15 @@ def copy_metadata(source_path, target_path):
             write_exif()
     else:
         write_exif()
-
     if target_path.suffix.lower() in in_format and 'Creation Date' not in subprocess.run(['exiftool', '-QuickTime:CreationDate', str(source_path), '-m'], capture_output=True, text=True).stdout:
         def try_get_time(exiftime_list, exif_info_json, key):
             if key in exif_info_json:
                 try:
                     if '+' in exif_info_json[key]:
-                        format = '%Y:%m:%d %H:%M:%S%z'
+                        format_str = '%Y:%m:%d %H:%M:%S%z'
                     else:
-                        format = '%Y:%m:%d %H:%M:%S'
-                    exiftime_list.append(datetime.strptime(exif_info_json[key], format))
+                        format_str = '%Y:%m:%d %H:%M:%S'
+                    exiftime_list.append(datetime.strptime(exif_info_json[key], format_str))
                 except ValueError:
                     pass
             return exiftime_list
@@ -118,21 +114,17 @@ def copy_metadata(source_path, target_path):
         exiftime = try_get_time(exiftime, exif_info_json, 'ModifyDate')
         exiftime = try_get_time(exiftime, exif_info_json, 'DateTimeOriginal')
         exiftime = try_get_time(exiftime, exif_info_json, 'CreationDate')
-
         for i in range(len(exiftime)):
             if exiftime[i].tzinfo is None:
                 exiftime[i] = exiftime[i].replace(tzinfo=datetime.now().astimezone().tzinfo)
         write_time = min(exiftime)
-
-        cmd = ['exiftool', '-QuickTime:CreationDate=' + write_time.strftime('%Y:%m:%d %H:%M:%S-%z'),
+        cmd = ['exiftool', '-QuickTime:CreationDate=' + write_time.strftime('%Y:%m:%d %H:%M:%S%z'),
                str(target_path), '-overwrite_original']
         assert cmd_runner(cmd)
-
         if 'DateTimeOriginal' not in exif_info_json:
             cmd = ['exiftool', '-DateTimeOriginal=' + write_time.strftime('%Y:%m:%d %H:%M:%S'),
                    str(target_path), '-overwrite_original']
             assert cmd_runner(cmd)
-
     os.utime(target_path, (write_time.timestamp(), write_time.timestamp()))
 
 
@@ -147,19 +139,16 @@ def is_rotated_video_ffprobe(video_file):
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            logging.error(f"无法获取视频 {video_file} 的旋转信息")
+            logging.error(f"Cannot get rotation info for video {video_file}")
             return False
-
         rotation = result.stdout.strip()
         if rotation == '':
             rotation = 0
         else:
             rotation = int(rotation)
-
         return rotation in [90, 270]
-
     except Exception as e:
-        logging.error(f"检查视频旋转时出错: {e}")
+        logging.error(f"Error checking video rotation: {e}")
         return False
 
 
@@ -174,20 +163,17 @@ def is_rotated_video_exiftool(video_file):
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            logging.error(f"无法获取视频 {video_file} 的旋转信息")
+            logging.error(f"Cannot get rotation info for video {video_file}")
             return False
-
         output = result.stdout.strip()
         rotation = 0
         if output:
             match = re.search(r'Rotation\s*:\s*(\d+)', output)
             if match:
                 rotation = int(match.group(1))
-
         return rotation in [90, 270]
-
     except Exception as e:
-        logging.error(f"检查视频旋转时出错: {e}")
+        logging.error(f"Error checking video rotation: {e}")
         return False
 
 
@@ -207,29 +193,23 @@ def convert_video(source_path, target_path, ffmpeg_args, max_resolution=None):
         if probe_result.returncode != 0:
             logging.error(f"Failed to get video resolution for {source_path}")
             return False, size_factor
-
         width, height = map(int, probe_result.stdout.strip().split('x')[:2])
         resolution = width * height
-
         if max_resolution and resolution > max_resolution:
             if is_rotated_video(source_path):
                 width, height = height, width
-
             scale_factor = (max_resolution / resolution) ** 0.5
             target_width = round(width * scale_factor)
             target_height = round(height * scale_factor)
-
             if target_width % 2 != 0:
                 target_width += 1
             if target_height % 2 != 0:
                 target_height += 1
-
             scale_filter = f"-vf scale={target_width}:{target_height}"
         else:
             scale_filter = ""
     except Exception as e:
         logging.error(f"Error getting video resolution: {e}")
-
     cmd = [
         'ffmpeg',
         '-i',
@@ -239,7 +219,6 @@ def convert_video(source_path, target_path, ffmpeg_args, max_resolution=None):
         str(target_path)
     ]
     result = cmd_runner(cmd)
-
     if result:
         try:
             source_size = source_path.stat().st_size
@@ -250,69 +229,90 @@ def convert_video(source_path, target_path, ffmpeg_args, max_resolution=None):
                 size_factor = 0
         except Exception as e:
             logging.error(f"Error calculating size factor: {e}")
-            size_factor = 1.0  # 默认比例为1.0
-
+            size_factor = 1.0  # Default to 1.0
         return True, size_factor
     return False, size_factor
 
 
-def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='.mp4', max_resolution=3840*2160, all_files=None):
+def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='.mp4', max_resolution=3840*2160, all_files=None, temp_dir=None):
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    if temp_dir:
+        temp_dir = Path(temp_dir)
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
     if all_files is None:
         all_files = [f for f in input_dir.rglob('*') if '@eaDir' not in str(f)]
-
     video_files = [f for f in all_files if f.suffix.lower() in in_format]
-
     for video_file in tqdm(video_files, desc="Converting", ncols=50):
         start_time = time.time()
         logging.info(f"Start converting {video_file}")
-
         relative_path = video_file.relative_to(input_dir)
         target_file = output_dir / relative_path
         target_file = target_file.with_suffix(ext)
         target_file.parent.mkdir(parents=True, exist_ok=True)
-
-        # 如果目标文件已经存在，则只复制元数据
+        # If target file already exists, copy metadata and continue
         if target_file.exists():
             logging.info(f"Target file already exists: {target_file}")
             copy_metadata(video_file, target_file)
             continue
 
-        # 定义临时文件名
-        temp_target = target_file.with_name("ffmpeg_temp" + ext)
-        # 如果临时文件存在，先删除
-        if temp_target.exists():
-            os.remove(temp_target)
-
-        source_duration = get_video_duration(str(video_file))
-        convert_success, size_factor = convert_video(video_file, temp_target, ffmpeg_args, max_resolution)
-
-        if convert_success:
-            # 验证输出时长
-            target_duration = get_video_duration(str(temp_target))
-            if (source_duration == 0 or abs(source_duration - target_duration) / source_duration > 0.05) and (source_duration - target_duration > 1):
-                logging.error(f"Duration mismatch: {source_duration} vs {target_duration}")
-                if temp_target.exists():
-                    os.remove(temp_target)
+        # Prepare temporary input and output files
+        if temp_dir:
+            unique_id = uuid.uuid4().hex
+            temp_input_file = temp_dir / (unique_id + '_input' + video_file.suffix)
+            temp_output_file = temp_dir / (unique_id + '_output' + ext)
+            # Copy source file to temp_dir
+            try:
+                shutil.copy2(video_file, temp_input_file)
+                # logging.info(f"Copied {video_file} to temp dir {temp_input_file}")
+            except Exception as e:
+                logging.error(f"Failed to copy {video_file} to temp dir {temp_dir}: {e}")
                 continue
-
-            # 转码成功后重命名临时文件为最终文件
-            os.rename(temp_target, target_file)
-            copy_metadata(video_file, target_file)
-            if delete_original:
-                os.remove(video_file)
-            run_time = time.time() - start_time
-            time_ratio = run_time / source_duration if source_duration > 0 else 0
-            logging.info(f"Converted {video_file}")
-            logging.info(f"Size factor (source/target): {size_factor:.4f}, Processing Time: {run_time:.2f}s, Time ratio: {time_ratio:.2f}x of real-time")
         else:
-            # 转码失败则删除临时文件
-            if temp_target.exists():
-                os.remove(temp_target)
-            logging.error(f"Failed to convert {video_file}")
+            temp_input_file = video_file
+            temp_output_file = target_file.with_name("ffmpeg_temp" + ext)
+            # If temporary output file exists, remove it
+            if temp_output_file.exists():
+                os.remove(temp_output_file)
+
+        source_file = temp_input_file
+
+        try:
+            source_duration = get_video_duration(str(source_file))
+            convert_success, size_factor = convert_video(source_file, temp_output_file, ffmpeg_args, max_resolution)
+            if convert_success:
+                # Verify output duration
+                target_duration = get_video_duration(str(temp_output_file))
+                if (source_duration == 0 or abs(source_duration - target_duration) / source_duration > 0.05) and (source_duration - target_duration > 1):
+                    logging.error(f"Duration mismatch: {source_duration} vs {target_duration}")
+                    if temp_output_file.exists():
+                        os.remove(temp_output_file)
+                    continue
+                # Move the converted file to the target location
+                shutil.move(str(temp_output_file), str(target_file))
+                copy_metadata(video_file, target_file)
+                if delete_original:
+                    os.remove(video_file)
+                run_time = time.time() - start_time
+                time_ratio = run_time / source_duration if source_duration > 0 else 0
+                logging.info(f"Converted {video_file}")
+                logging.info(f"Size factor (source/target): {size_factor:.4f}, Processing Time: {run_time:.2f}s, Time ratio: {time_ratio:.2f}x of real-time")
+            else:
+                # Conversion failed; remove temporary output file
+                if temp_output_file.exists():
+                    os.remove(temp_output_file)
+                logging.error(f"Failed to convert {video_file}")
+        except Exception as e:
+            logging.error(f"Error processing {video_file}: {e}")
+        finally:
+            # Clean up temporary input file
+            if temp_dir and temp_input_file.exists():
+                os.remove(temp_input_file)
 
 
 def main():
@@ -328,11 +328,10 @@ def main():
                         default="-loglevel error -stats -c:v libsvtav1 -preset 8 -crf 36 -pix_fmt yuv420p10le -svtav1-params film-grain=8 -svtav1-params adaptive-film-grain=1 -c:a libopus -b:a 64k")
     parser.add_argument("--max_resolution", type=int,
                         help="Maximum resolution (in pixels).")
-
+    parser.add_argument("--temp_dir", type=str, help="Temporary directory for processing files.")
     args = parser.parse_args()
-
     process_directory(args.input_dir, args.output_dir,
-                      args.delete, args.ffmpeg_args, max_resolution=args.max_resolution)
+                      args.delete, args.ffmpeg_args, max_resolution=args.max_resolution, temp_dir=args.temp_dir)
 
 
 if __name__ == "__main__":
