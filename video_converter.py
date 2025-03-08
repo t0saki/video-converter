@@ -43,8 +43,14 @@ def get_video_duration(filename):
 
 def cmd_runner(cmd):
     try:
+        # 使用 os.setpgrp 将新创建的进程放入一个新的进程组
         result = subprocess.run(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True  # 关键修改
+        )
         result.check_returncode()
         return result
     except subprocess.CalledProcessError as e:
@@ -212,6 +218,7 @@ def convert_video(source_path, target_path, ffmpeg_args, max_resolution=None):
         logging.error(f"Error getting video resolution: {e}")
     cmd = [
         'ffmpeg',
+        '-nostdin',  # 禁止后台化
         '-i',
         str(source_path),
         *ffmpeg_args.split(),
@@ -239,16 +246,18 @@ def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if temp_dir:
-        temp_dir = Path(temp_dir)
-        if temp_dir.exists():
-            shutil.rmtree(temp_dir)
-        temp_dir.mkdir(parents=True, exist_ok=True)
 
     if all_files is None:
         all_files = [f for f in input_dir.rglob('*') if '@eaDir' not in str(f)]
     video_files = [f for f in all_files if f.suffix.lower() in in_format]
     for video_file in tqdm(video_files, desc="Converting", ncols=50):
+        
+        if temp_dir:
+            temp_dir = Path(temp_dir)
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+            temp_dir.mkdir(parents=True, exist_ok=True)
+
         start_time = time.time()
         logging.info(f"Start converting {video_file}")
         relative_path = video_file.relative_to(input_dir)
