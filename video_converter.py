@@ -267,7 +267,10 @@ def process_directory(input_dir, output_dir, delete_original, ffmpeg_args, ext='
         # If target file already exists, copy metadata and continue
         if target_file.exists():
             logging.info(f"Target file already exists: {target_file}")
-            copy_metadata(video_file, target_file)
+            try:
+                copy_metadata(video_file, target_file)
+            except Exception as e:
+                logging.error(f"Failed to copy metadata: {e}")
             continue
 
         # Prepare temporary input and output files
@@ -334,7 +337,7 @@ def main():
     parser.add_argument("--delete", action='store_true',
                         help="Delete original files after conversion.")
     parser.add_argument("--ffmpeg_args", type=str, help="Additional arguments to pass to ffmpeg.",
-                        default="-loglevel error -stats -c:v libsvtav1 -preset 8 -crf 36 -pix_fmt yuv420p10le -svtav1-params film-grain=8 -svtav1-params adaptive-film-grain=1 -c:a libopus -b:a 64k")
+                        default="-loglevel error -stats -c:v libsvtav1 -preset 6 -crf 36 -pix_fmt yuv420p10le -svtav1-params \"tune=0:film-grain=8:film-grain-denoise=1\" -c:a libopus -b:a 64k")
     parser.add_argument("--max_resolution", type=int,
                         help="Maximum resolution (in pixels).")
     parser.add_argument("--temp_dir", type=str, help="Temporary directory for processing files.")
